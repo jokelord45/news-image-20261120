@@ -1,63 +1,60 @@
-"""Friday 20 November 2026, summed up in a single picture.
+"""Publish the Friday 20 November 2026 front page.
 
-The repository ships `entry.png`: a broadsheet front page for the day.
-Cyclone Akvan's landfall on the Odisha coast leads the page; the panels
-below it cover Anthropic's record IPO debut, the COP31 close in Antalya,
-the Houthi missile strike on Riyadh, the Hormuz tanker attacks and the
-European allies' Berlin talks on Russia, with a strip of shorter items
-along the foot of the page.
+The repository holds one picture, entry.png: a JPEG broadsheet front
+page summing up the day's world news. Cyclone Akvan's landfall on the
+Odisha coast is the lead story; five panels below it cover Anthropic's
+record IPO debut, the COP31 close in Antalya, the Houthi missile
+strike on Riyadh, the Hormuz tanker attacks and the Berlin talks on
+Russia, with a strip of shorter items along the foot of the page.
 
-This script is the entrypoint. It copies the bundled picture into the
-grading output folder, byte for byte, and stops with an error unless
-the copy is a complete JPEG no larger than one mebibyte.
+Running this module copies that picture, byte for byte, into the
+grading output directory. It refuses to publish anything that is not
+a complete JPEG inside the one-mebibyte cap, and it checks the copy
+against the source by comparing digests, so two runs always write
+the same bytes.
 """
 
-from hashlib import sha256
-from os import environ
-import pathlib
+import hashlib
+import os
+import sys
+from pathlib import Path
 
-ENTRY = "entry.png"
-SIZE_LIMIT = 1048576
-JPEG_PREFIX = b"\xff\xd8\xff"
-
-
-def bundled_picture() -> pathlib.Path:
-    here = pathlib.Path(__file__).resolve().parent
-    return here / ENTRY
+PICTURE_NAME = "entry.png"
+MAX_BYTES = 1024 * 1024
+JPEG_MAGIC = bytes((0xFF, 0xD8, 0xFF))
 
 
-def target_folder() -> pathlib.Path:
-    wanted = environ.get("MAKEFUN_OUTPUT_DIR") or "/output"
-    return pathlib.Path(wanted)
+def source_picture():
+    return Path(__file__).resolve().with_name(PICTURE_NAME)
 
 
-def read_picture(path: pathlib.Path) -> bytes:
-    blob = path.read_bytes()
-    if len(blob) == 0:
-        raise SystemExit(f"refusing to publish an empty {path.name}")
-    if len(blob) > SIZE_LIMIT:
-        raise SystemExit(
-            f"{path.name} is {len(blob)} bytes, over the {SIZE_LIMIT} limit"
-        )
-    if blob[: len(JPEG_PREFIX)] != JPEG_PREFIX:
-        raise SystemExit(f"{path.name} does not start with a JPEG header")
-    return blob
+def output_dir():
+    return Path(os.environ.get("MAKEFUN_OUTPUT_DIR", "/output"))
 
 
-# The grader runs the entrypoint twice and requires identical bytes
-# both times, so publish() performs no step that could vary: the
-# picture is copied as stored, and the only check is a digest
-# comparison of what was written against what was read.
-def publish() -> None:
-    picture = bundled_picture()
-    blob = read_picture(picture)
-    wanted = target_folder() / ENTRY
-    wanted.parent.mkdir(parents=True, exist_ok=True)
-    wanted.write_bytes(blob)
-    again = read_picture(wanted)
-    if sha256(again).hexdigest() != sha256(blob).hexdigest():
-        raise SystemExit("the published copy is not identical to the source")
+def load_jpeg(path):
+    data = path.read_bytes()
+    if not data:
+        sys.exit(f"{path.name} is empty, refusing to publish it")
+    if len(data) > MAX_BYTES:
+        sys.exit(f"{path.name} is {len(data)} bytes, over the {MAX_BYTES} cap")
+    if data[:3] != JPEG_MAGIC:
+        sys.exit(f"{path.name} is not a JPEG")
+    return data
+
+
+def main():
+    data = load_jpeg(source_picture())
+    dest = output_dir()
+    dest.mkdir(parents=True, exist_ok=True)
+    target = dest / PICTURE_NAME
+    target.write_bytes(data)
+    published = load_jpeg(target)
+    if len(published) != len(data):
+        sys.exit("published copy is not the same size as the source picture")
+    if hashlib.sha256(published).digest() != hashlib.sha256(data).digest():
+        sys.exit("published copy differs from the source picture")
 
 
 if __name__ == "__main__":
-    publish()
+    main()
